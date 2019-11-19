@@ -1,0 +1,5 @@
+print("Hello world!\n")
+print("Who are you?")
+firstVariable = input()
+print("Was " + firstVariable + " your input?")
+print("Whatever...\n")

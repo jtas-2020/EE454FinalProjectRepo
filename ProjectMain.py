@@ -9,31 +9,37 @@ from openpyxl import Workbook
 
 # Main
 def main():
+    # Gathers information, creates the admittance matrix, and creates the output file
     tolerance, input_path, output_path = ask_user()
-    values, input_line, bus_size, tot_implicit = initialize(input_path)
+    values, input_line, bus_size, tot_implicit, input_bus = initialize(input_path)
     g_matrix, b_matrix = admittance(input_line)
+    wb, ws1, ws2, ws3 = create_file()
 
-    wb = Workbook()
-    ws1 = wb.active
-    ws1.title = "BusResults"
-    ws2 = wb.create_sheet(title="ConvergenceHistory")
-    ws3 = wb.create_sheet(title="LineFlow")
-    wb.save(output_path + '\\output_results.xlsx')
-
-    converged, mismatches, max_p, max_q = mismatch(tolerance, g_matrix, b_matrix, values, bus_size, tot_implicit)
+    # Creates the first iteration of the mismatch
+    known_power = track_type(input_bus, bus_size)
+    converged, mismatches, max_p, max_q, p_bus, q_bus = mismatch(tolerance, g_matrix, b_matrix, values, bus_size, tot_implicit)
     mismatches_old = mismatches.copy()
     diverged = False
     iteration = 0
+    write_cont(ws2, iteration, max_p, max_q, p_bus, q_bus)
+
+    # While not within tolerance but not diverging
     while not converged and not diverged:
+        # Creates the Jacobian and solves for this iteration's new voltage and angle values
         j_matrix = build_jacobian(values, g_matrix, b_matrix, mismatch_size=len(mismatches))
         corrections = correct(j_matrix, mismatches)
         values = update(corrections, values)
-        converged, mismatches, max_p, max_q = mismatch(tolerance, g_matrix, b_matrix, values, bus_size, tot_implicit)
+
+        # Creates the next iteration's mismatch equations and checks for convergence / divergence
+        converged, mismatches, max_p, max_q, p_bus, q_bus = mismatch(tolerance, g_matrix, b_matrix, values, bus_size, tot_implicit)
         for i in range(len(mismatches)):
             if mismatches[i] >= mismatches_old[i]:
                 diverged = True
         iteration += 1
+        write_cont(ws2, iteration, max_p, max_q, p_bus, q_bus)
         mismatches_old = mismatches.copy()
+
+    wb.save(output_path + '\\output_results.xlsx')
     if diverged:
         print("No solution found.")
     else:
@@ -81,7 +87,7 @@ def initialize(input_path):
         else:
             values[i, 4] = 2.0  # PQ bus
             tot_implicit += 2
-    return values, input_line, bus_size, tot_implicit
+    return values, input_line, bus_size, tot_implicit, input_bus
 
 
 # Admittance matrix Y = G + jB
@@ -109,12 +115,63 @@ def admittance(input_line):
     return g_matrix, b_matrix
 
 
+# Creates the output file and its headers
+def create_file():
+    wb = Workbook()
+    ws1 = wb.active
+    ws1.title = "BusResults"
+    ws1.cell(row=1, column=1).value = "Bus Number"
+    ws1.cell(row=1, column=2).value = "V(p.u.)"
+    ws1.cell(row=1, column=3).value = "Angle(deg)"
+    ws1.cell(row=1, column=4).value = "Pinj. (MW)"
+    ws1.cell(row=1, column=5).value = "Qinj. (MVAr)"
+    ws1.cell(row=1, column=6).value = "Voltage Violation"
+    ws2 = wb.create_sheet(title="ConvergenceHistory")
+    ws2.cell(row=1, column=1).value = "Iteration"
+    ws2.cell(row=1, column=2).value = "Max P Mismatch"
+    ws2.cell(row=1, column=3).value = "P Bus"
+    ws2.cell(row=1, column=4).value = "Max Q Mismatch"
+    ws2.cell(row=1, column=5).value = "Q Bus"
+    ws3 = wb.create_sheet(title="LineFlow")
+    ws3.cell(row=1, column=1).value = "From Bus"
+    ws3.cell(row=1, column=2).value = "To Bus"
+    ws3.cell(row=1, column=3).value = "P Flow(MW)"
+    ws3.cell(row=1, column=4).value = "Q Flow(MVAr)"
+    ws3.cell(row=1, column=5).value = "S Flow(MVA)"
+    ws3.cell(row=1, column=6).value = "MVA Violation"
+    return wb, ws1, ws2, ws3
+
+
+# Helps keep track of which powers are given and which need to be solved for explicitly
+# 0 means the value is not known, else it is 1
+def track_type(input_bus, bus_size):
+    known_power = np.zeros((2, bus_size))  # 0 for unknown (explicit), 1 for known (implicit)
+    for i in range(bus_size):
+        bus_type = input_bus.cell(row=i+2, column=4).value
+        if bus_type == "S":
+            known_power[0][i], known_power[1][i] = 0, 0
+        elif bus_type == "G":
+            known_power[0][i], known_power[1][i] = 1, 0
+        else:
+            known_power[0][i], known_power[1][i] = 1, 1
+    return known_power
+
+
 # Calculates the mismatch, decides if converged, and which buses have largest mismatch for real and reactive power
 def mismatch(tolerance, g_matrix, b_matrix, values, bus_size, tot_implicit):
     mismatches = np.zeros(tot_implicit)
     max_p = 0.0000
     max_q = 0.0000
+    p_bus = -1
+    q_bus = -1
     converged = True
+    max_p, p_bus, converged = write_p(tolerance, g_matrix, b_matrix, values, bus_size, max_p, p_bus, converged)
+    max_q, q_bus, converged= write_q(tolerance, g_matrix, b_matrix, values, bus_size, max_q, q_bus, converged)
+    return converged, mismatches, max_p, max_q, p_bus, q_bus
+
+
+# Creates the mismatch values for the real power equations
+def write_p(tolerance, g_matrix, b_matrix, values, bus_size, max_p, p_bus, converged):
     for k in range(bus_size):  # Calculate real power mismatch
         if values[k][4] == 1.0 or 2.0:  # PV or PQ bus, respectively
             p_sum = 0.0
@@ -126,6 +183,12 @@ def mismatch(tolerance, g_matrix, b_matrix, values, bus_size, tot_implicit):
                 converged = False
             if max_p < p_sum:
                 max_p = p_sum
+                p_bus = k + 1
+    return max_p, p_bus, converged
+
+
+# Creates the mismatch values for the reactive power equations
+def write_q(tolerance, g_matrix, b_matrix, values, bus_size, max_q, q_bus, converged):
     for k in range(bus_size):  # Calculate reactive power mismatch
         if values[k][4] == 2.0:  # PQ bus
             q_sum = 0.0
@@ -137,7 +200,17 @@ def mismatch(tolerance, g_matrix, b_matrix, values, bus_size, tot_implicit):
                 converged = False
             if max_q < q_sum:
                 max_q = q_sum
-    return converged, mismatches, max_p, max_q
+                q_bus = k + 1
+    return max_q, q_bus, converged
+
+
+# Writes the history of this iteration to the output file
+def write_cont(ws2, iteration, max_p, max_q, p_bus, q_bus):
+    ws2.cell(row=(iteration + 2), column=1).value = iteration
+    ws2.cell(row=(iteration + 2), column=2).value = max_p
+    ws2.cell(row=(iteration + 2), column=3).value = p_bus
+    ws2.cell(row=(iteration + 2), column=4).value = max_q
+    ws2.cell(row=(iteration + 2), column=5).value = q_bus
 
 
 # Creates the Jacobian matrix for the current iteration
@@ -155,7 +228,7 @@ def correct(j_matrix, mismatches):
 
 
 # Updates the values matrix for this iteration
-def update(corrections, values):
+def update(corrections, values, input_bus):
 
     return values
 

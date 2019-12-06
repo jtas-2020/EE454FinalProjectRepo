@@ -28,7 +28,7 @@ def main():
         # Creates the Jacobian and solves for this iteration's new voltage and angle values
         j_matrix = build_jacobian(values, g_matrix, b_matrix, mismatch_size=len(mismatches))
         corrections = correct(j_matrix, mismatches)
-        values = update(corrections, values)
+        values = update(corrections, values, known_power)
 
         # Creates the next iteration's mismatch equations and checks for convergence / divergence
         converged, mismatches, max_p, max_q, p_bus, q_bus = mismatch(tolerance, g_matrix, b_matrix, values, bus_size, tot_implicit)
@@ -228,8 +228,18 @@ def correct(j_matrix, mismatches):
 
 
 # Updates the values matrix for this iteration
-def update(corrections, values, input_bus):
-
+# Adds the angles first based on the real power known, then adds the voltages based on the reactive power known
+def update(corrections, values, known_power):
+    tracker = 0
+    for i in range(2):
+        for j in range(len(known_power)):
+            if known_power[i][j] == 1:
+                values[j][3] = corrections[tracker]
+                tracker += 1
+        for k in range(len(known_power)):
+            if known_power[i][k] == 1:
+                values[k][2] = corrections[tracker]
+                tracker += 1
     return values
 
 

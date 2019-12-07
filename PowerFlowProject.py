@@ -2,9 +2,7 @@
 import numpy as np
 import scipy as sp
 from scipy import linalg
-import openpyxl
 from openpyxl import load_workbook
-from openpyxl import Workbook
 
 
 s_base = 100.0
@@ -24,7 +22,7 @@ def main():
 
     while max_mismatch[0,0] > tolerance or max_mismatch[1,0] > tolerance:  # repeat until converged
         jacobian = calc_jacobian(bus_info, load_info, g_matrix, b_matrix, bus_size, load_size)
-        corrections = -1*np.matmul((np.linalg.inv(jacobian)),mismatch)
+        corrections = -1*np.matmul((linalg.inv(jacobian)),mismatch)
 
         # update the values for voltage and angle in the different matrices, then recalculate mismatch
         for i in range(bus_size-1):
@@ -37,9 +35,9 @@ def main():
         mismatch, max_mismatch = calc_mismatch(g_matrix, b_matrix, bus_info, load_info, bus_size, load_size, ws2,
                                                iteration)
         wb.save(output_path + '\\output_results.xlsx')
-        print(iteration)
 
-    finish_up(ws1, ws3, bus_info, bus_size, input_line, line_size)
+    finish_up(ws1, ws3, bus_info, bus_size, g_matrix, b_matrix, input_line, line_size)
+    wb.remove(wb['LineData'])
     wb.save(output_path + '\\output_results.xlsx')
     print("Done")
 
@@ -199,7 +197,9 @@ def calc_mismatch(g_matrix, b_matrix, bus_info, load_info, bus_size, load_size, 
             count += 1
     for i in range(load_size):
         for j in range(bus_size):
-            mismatch[count] += load_info[i,2]*bus_info[j,4]*(g_matrix[int(load_info[i,0]),j]*np.sin(bus_info[i,5]-bus_info[j,5])-b_matrix[int(load_info[i,0]),j]*np.cos(bus_info[i,5]-bus_info[j,5]))
+            mismatch[count] += load_info[i,2]*bus_info[j,4]*(
+                    g_matrix[int(load_info[i,0]),j]*np.sin(
+                bus_info[i,5]-bus_info[j,5])-b_matrix[int(load_info[i,0]),j]*np.cos(bus_info[i,5]-bus_info[j,5]))
         mismatch[count] += bus_info[int(load_info[i,0]),3]
         if abs(mismatch[count]) > abs(max_mismatch[1, 0]):
             max_mismatch[1, 0] = abs(mismatch[count])
@@ -306,12 +306,12 @@ def calc_j22(bus_info, load_info, g_matrix, b_matrix, bus_size, load_size):
 # Finds the unknown P's and Q's, calculates line flow, and prepares the output file
 def finish_up(ws1, ws3, bus_info, bus_size, g_matrix, b_matrix, input_line, line_size):
     for i in range(bus_size):
-        bus_info[0,3] += (bus_info[0,4]*bus_info[i,4]
+        bus_info[0,2] += (bus_info[0,4]*bus_info[i,4]
                                     *(g_matrix[0,i]*np.cos(bus_info[0,5]-bus_info[i,5])
                                       +b_matrix[0,i]*np.sin(bus_info[0,5]-bus_info[i,5])))
         ws1.cell(row=i+2, column=1).value = i+1
         ws1.cell(row=i+2, column=2).value = bus_info[i, 4]
-        bus_info[i, 5] *= 180.0 / 3.1415
+        bus_info[i, 5] = sp.rad2deg(bus_info[i,5])
         ws1.cell(row=i + 2, column=3).value = bus_info[i, 5]
         ws1.cell(row=i + 2, column=4).value = s_base*bus_info[i, 2]
         ws1.cell(row=i + 2, column=5).value = -1*s_base*bus_info[i, 3]
@@ -320,14 +320,15 @@ def finish_up(ws1, ws3, bus_info, bus_size, g_matrix, b_matrix, input_line, line
         else:
             ws1.cell(row=i + 2, column=6).value = "FALSE"
 
-        for i in range(line_size):
-            ws3.cell(row=i + 2, column=1).value = input_line[i, 0]
-            ws3.cell(row=i + 2, column=2).value = input_line[i, 1]
+    for i in range(line_size):
+        ws3.cell(row=i + 2, column=1).value = input_line[i, 0]
+        ws3.cell(row=i + 2, column=2).value = input_line[i, 1]
 
-            if input_line[i,5] < ws3.cell(row=i+2, column=5).value:
-                ws3.cell(row=i + 2, column=6).value = "TRUE"
-            else:
-                ws3.cell(row=i + 2, column=6).value = "FALSE"
+        ws3.cell(row=i + 2, column=5).value = 0
+        if input_line[i,5] < ws3.cell(row=i+2, column=5).value:
+            ws3.cell(row=i + 2, column=6).value = "TRUE"
+        else:
+            ws3.cell(row=i + 2, column=6).value = "FALSE"
 
 
 main()

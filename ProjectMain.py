@@ -26,7 +26,7 @@ def main():
     # While not within tolerance but not diverging
     while not converged and not diverged:
         # Creates the Jacobian and solves for this iteration's new voltage and angle values
-        j_matrix = build_jacobian(values, g_matrix, b_matrix, mismatch_size=len(mismatches))
+        j_matrix = build_jacobian(values, g_matrix, b_matrix, known_power, mismatch_size=len(mismatches))
         corrections = correct(j_matrix, mismatches)
         values = update(corrections, values, known_power)
 
@@ -165,13 +165,14 @@ def mismatch(tolerance, g_matrix, b_matrix, values, bus_size, tot_implicit):
     p_bus = -1
     q_bus = -1
     converged = True
-    max_p, p_bus, converged = write_p(tolerance, g_matrix, b_matrix, values, bus_size, max_p, p_bus, converged)
-    max_q, q_bus, converged= write_q(tolerance, g_matrix, b_matrix, values, bus_size, max_q, q_bus, converged)
+    max_p, p_bus, converged, mismatches, count = write_p(tolerance, g_matrix, b_matrix, values, bus_size, max_p, p_bus, converged, mismatches)
+    max_q, q_bus, converged, mismatches = write_q(tolerance, g_matrix, b_matrix, values, bus_size, max_q, q_bus, converged, mismatches, count)
     return converged, mismatches, max_p, max_q, p_bus, q_bus
 
 
 # Creates the mismatch values for the real power equations
-def write_p(tolerance, g_matrix, b_matrix, values, bus_size, max_p, p_bus, converged):
+def write_p(tolerance, g_matrix, b_matrix, values, bus_size, max_p, p_bus, converged, mismatches):
+    count = 0
     for k in range(bus_size):  # Calculate real power mismatch
         if values[k][4] == 1.0 or 2.0:  # PV or PQ bus, respectively
             p_sum = 0.0
@@ -179,31 +180,38 @@ def write_p(tolerance, g_matrix, b_matrix, values, bus_size, max_p, p_bus, conve
                 temp_var = g_matrix[k][i]*np.cos(values[k][3]-values[i][3]) + b_matrix[k][i]*np.sin(values[k][3]-values[i][3])
                 p_sum += values[k][2]*values[i][2]*temp_var
             p_sum -= values[k][0]  # Subtracts the actual real power injected from the summation
+            mismatches[count] = p_sum
             if p_sum > tolerance:
                 converged = False
             if max_p < p_sum:
                 max_p = p_sum
                 p_bus = k + 1
-    return max_p, p_bus, converged
+            count += 1
+    return max_p, p_bus, converged, mismatches, count
 
 
 # Creates the mismatch values for the reactive power equations
-def write_q(tolerance, g_matrix, b_matrix, values, bus_size, max_q, q_bus, converged):
+def write_q(tolerance, g_matrix, b_matrix, values, bus_size, max_q, q_bus, converged, mismatches, count):
     for k in range(bus_size):  # Calculate reactive power mismatch
         if values[k][4] == 2.0:  # PQ bus
             q_sum = 0.0
             for i in range(bus_size):
                 temp_var = g_matrix[k][i]*np.sin(values[k][3]-values[i][3]) - b_matrix[k][i]*np.cos(values[k][3]-values[i][3])
                 q_sum += values[k][2]*values[i][2]*temp_var
+                print(q_sum)
             q_sum -= values[k][1]  # Subtracts the actual reactive power injected from the summation
+            #mismatches[count] = q_sum
+            print(q_sum)
+            print()
             if q_sum > tolerance:
                 converged = False
             if max_q < q_sum:
                 max_q = q_sum
                 q_bus = k + 1
-    return max_q, q_bus, converged
+            count += 1
+    return max_q, q_bus, converged, mismatches
 
-
+'''
 # Writes the history of this iteration to the output file
 def write_cont(ws2, iteration, max_p, max_q, p_bus, q_bus):
     ws2.cell(row=(iteration + 2), column=1).value = iteration
@@ -214,9 +222,31 @@ def write_cont(ws2, iteration, max_p, max_q, p_bus, q_bus):
 
 
 # Creates the Jacobian matrix for the current iteration
-def build_jacobian(values, g_matrix, b_matrix, mismatch_size):
+def build_jacobian(values, g_matrix, b_matrix, known_power, mismatch_size):
+    pass
     j_matrix = np.zeros((mismatch_size, mismatch_size))
-
+    for i in range(mismatch_size):
+        for j in range(mismatch_size):
+            i_bus = mis
+            j_bus =
+            if i == j:
+                if i_bus == 0 and j_pq == 0:
+                    j_matrix = -values[1][i]-b_matrix[i][i]*values[2][i]**2
+                elif i_pq == 0 and j_pq == 1:
+                    j_matrix =
+                elif i_pq == 1 and j_pq == 0:
+                    j_matrix =
+                else:
+                    j_matrix =
+            else:
+                if i_pq == 0 and j_pq == 0:
+                    j_matrix =
+                elif i_pq == 0 and j_pq == 1:
+                    j_matrix =
+                elif i_pq == 1 and j_pq == 0:
+                    j_matrix =
+                else:
+                    j_matrix =
     return j_matrix
 
 
@@ -240,7 +270,7 @@ def update(corrections, values, known_power):
             if known_power[i][k] == 1:
                 values[k][2] = corrections[tracker]
                 tracker += 1
-    return values
+    return values'''
 
 
 main()

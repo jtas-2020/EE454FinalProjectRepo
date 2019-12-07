@@ -17,11 +17,31 @@ def main():
     wb, ws1, ws2, ws3, ws4, ws5, input_bus, input_line, bus_size, line_size, input_bus_file = make_output(input_path)
     wb.save(output_path + '\\output_results.xlsx')
     bus_info, load_info, load_size = initialize(input_bus, bus_size, input_bus_file)
+
     g_matrix, b_matrix = admittance(input_line, line_size, ws4, ws5)
     mismatch, max_mismatch = calc_mismatch(g_matrix, b_matrix, bus_info, load_info, bus_size, load_size, ws2, iteration)
     wb.save(output_path + '\\output_results.xlsx')
-    jacobian = calc_jacobian(bus_info, load_info, g_matrix, b_matrix, bus_size, load_size)
-    print()
+
+    while max_mismatch[0,0] > tolerance or max_mismatch[1,0] > tolerance:  # repeat until converged
+        jacobian = calc_jacobian(bus_info, load_info, g_matrix, b_matrix, bus_size, load_size)
+        corrections = -1*np.matmul((np.linalg.inv(jacobian)),mismatch)
+
+        # update the values for voltage and angle in the different matrices, then recalculate mismatch
+        for i in range(bus_size-1):
+            bus_info[i+1, 5] += corrections[i]
+        for i in range(load_size):
+            load_info[i,2] += corrections[bus_size+i-1]
+            bus_info[int(load_info[i, 0]), 4] += corrections[bus_size + i - 1]
+            load_info[i,3] += bus_info[int(load_info[i,0]),5]
+        iteration += 1
+        mismatch, max_mismatch = calc_mismatch(g_matrix, b_matrix, bus_info, load_info, bus_size, load_size, ws2,
+                                               iteration)
+        wb.save(output_path + '\\output_results.xlsx')
+        print(iteration)
+
+    finish_up(ws1, ws3, bus_info, bus_size, input_line, line_size)
+    wb.save(output_path + '\\output_results.xlsx')
+    print("Done")
 
 
 # Asks the user for tolerance, import file path, and output file path
@@ -31,16 +51,13 @@ def main():
 def ask_user():
     print("What is your desired tolerance (in MVA)?")
     print("Eg. 0.1")
-    #a = float(input()) / s_base
-    a = 0.1 / s_base  # TODO: remove
+    a = float(input()) / s_base
     print("What is your input file path?")
     print("Eg. C:\\Users\\jtsch\\Desktop\\system_SampleInput.xlsx")
-    #b = input()
-    b = "C:\\Users\\jtsch\\Desktop\\system_SampleInput.xlsx"  # TODO: remove
+    b = input()
     print("What is your output file path?")
     print("Eg. C:\\Users\\jtsch\\Desktop")
-    #c = input()
-    c = "C:\\Users\\jtsch\\Desktop"  # TODO: remove
+    c = input()
     return a, b, c
 
 
@@ -172,7 +189,9 @@ def calc_mismatch(g_matrix, b_matrix, bus_info, load_info, bus_size, load_size, 
     for i in range(bus_size):
         if i>0:
             for j in range(bus_size):
-                mismatch[count] += bus_info[i,4]*bus_info[j,4]*(g_matrix[i,j]*np.cos(bus_info[i,5]-bus_info[j,5])+b_matrix[i,j]*np.sin(bus_info[i,5]-bus_info[j,5]))
+                mismatch[count] += (bus_info[i,4]*bus_info[j,4]
+                                    *(g_matrix[i,j]*np.cos(bus_info[i,5]-bus_info[j,5])
+                                      +b_matrix[i,j]*np.sin(bus_info[i,5]-bus_info[j,5])))
             mismatch[count] -= bus_info[i,2]
             if abs(mismatch[count]) > abs(max_mismatch[0,0]):
                 max_mismatch[0, 0] = abs(mismatch[count])
@@ -282,6 +301,33 @@ def calc_j22(bus_info, load_info, g_matrix, b_matrix, bus_size, load_size):
                 term2 = b_matrix[bus1,bus2]*np.cos(bus_info[bus1,5]-bus_info[bus2,5])
                 j22[i,j] = bus_info[bus1,4]*(term1-term2)
     return j22
+
+
+# Finds the unknown P's and Q's, calculates line flow, and prepares the output file
+def finish_up(ws1, ws3, bus_info, bus_size, g_matrix, b_matrix, input_line, line_size):
+    for i in range(bus_size):
+        bus_info[0,3] += (bus_info[0,4]*bus_info[i,4]
+                                    *(g_matrix[0,i]*np.cos(bus_info[0,5]-bus_info[i,5])
+                                      +b_matrix[0,i]*np.sin(bus_info[0,5]-bus_info[i,5])))
+        ws1.cell(row=i+2, column=1).value = i+1
+        ws1.cell(row=i+2, column=2).value = bus_info[i, 4]
+        bus_info[i, 5] *= 180.0 / 3.1415
+        ws1.cell(row=i + 2, column=3).value = bus_info[i, 5]
+        ws1.cell(row=i + 2, column=4).value = s_base*bus_info[i, 2]
+        ws1.cell(row=i + 2, column=5).value = -1*s_base*bus_info[i, 3]
+        if bus_info[i, 4] > 1.05 or bus_info[i, 4] < 0.95:
+            ws1.cell(row=i+2,column=6).value = "TRUE"
+        else:
+            ws1.cell(row=i + 2, column=6).value = "FALSE"
+
+        for i in range(line_size):
+            ws3.cell(row=i + 2, column=1).value = input_line[i, 0]
+            ws3.cell(row=i + 2, column=2).value = input_line[i, 1]
+
+            if input_line[i,5] < ws3.cell(row=i+2, column=5).value:
+                ws3.cell(row=i + 2, column=6).value = "TRUE"
+            else:
+                ws3.cell(row=i + 2, column=6).value = "FALSE"
 
 
 main()
